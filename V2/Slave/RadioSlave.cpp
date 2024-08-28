@@ -2,28 +2,24 @@
 
 RadioSlave* RadioSlave::handlerInstance = nullptr;
 
-void RadioSlave::Init(SPIClass* spiPort, uint8_t pinCE, uint8_t pinCS, uint8_t pinIRQ, int8_t powerLevel, uint8_t packetSize, uint8_t numberOfSendPackets, uint8_t numberOfReceivePackets, uint8_t frameRate)
+void RadioSlave::Init(_SPI* spiPort, uint8_t pinCE, uint8_t pinCS, uint8_t pinIRQ, int8_t powerLevel, uint8_t packetSize, uint8_t numberOfSendPackets, uint8_t numberOfReceivePackets, uint8_t frameRate)
 {
     handlerInstance = this;
     this->numberOfSendPackets = (numberOfSendPackets < 0) ? 0 : ((numberOfSendPackets > 3) ? 3 : numberOfSendPackets);
     this->numberOfReceivePackets = (numberOfReceivePackets < 0) ? 0 : ((numberOfReceivePackets > 3) ? 3 : numberOfReceivePackets);
     this->packetSize = (packetSize < 1) ? 1 : ((packetSize > 32) ? 32 : packetSize);
-    powerLevel = (powerLevel < 0) ? 0 : ((powerLevel > 3) ? 3 : powerLevel);
+    powerLevel = (powerLevel < 0) ? 0 : ((powerLevel > 3) ? 3: powerLevel);
 
     for (int i = 0; i < numberOfSendPackets; ++i)
-    {
         sendPackets[i] = new uint8_t[packetSize]();
-    }
 
     for (int i = 0; i < numberOfReceivePackets; ++i)
-    {
         receivePackets[i] = new uint8_t[packetSize]();
-    }
 
     ClearSendPackets();
     ClearReceivePackets();
 
-    // Radio initialization
+    // Initialize Radio
     spiPort->begin();
     radio.begin(spiPort, pinCE, pinCS);
     radio.stopListening();
@@ -41,7 +37,7 @@ void RadioSlave::Init(SPIClass* spiPort, uint8_t pinCE, uint8_t pinCS, uint8_t p
     radio.powerUp();
     radio.startListening();
 
-    // Interrupt for Radio
+    // Attach Interrupt for Radio
     attachInterrupt(digitalPinToInterrupt(pinIRQ), StaticIRQHandler, FALLING);
 
     // Frame Timing
@@ -61,15 +57,13 @@ void RadioSlave::StaticIRQHandler()
     }
 }
 
+volatile uint32_t lastInterruptTimeStamp = 0;
+
 void RadioSlave::IRQHandler()
 {
     interruptTimeStamp = micros() + syncDelay;
 
-    // Prevent false triggers by checking the difference
-    if (interruptTimeStamp - lastInterruptTimeStamp < halfMicrosPerFrame)
-    {
-        return;
-    }
+    if (interruptTimeStamp - lastInterruptTimeStamp < halfMicrosPerFrame) return;
 
     isSyncFrame = true;
     lastInterruptTimeStamp = interruptTimeStamp;
@@ -221,24 +215,15 @@ void RadioSlave::AdjustChannelIndex(int8_t amount)
 {
     currentChannelIndex += amount;
 
-    if (currentChannelIndex >= channelsToHop)
-    {
-        currentChannelIndex = channelsToHop - currentChannelIndex;
-    }
-    if (currentChannelIndex < 0)
-    {
-        currentChannelIndex += channelsToHop;
-    }
+    if (currentChannelIndex >= channelsToHop) currentChannelIndex = channelsToHop - currentChannelIndex;
+    if (currentChannelIndex < 0) currentChannelIndex += channelsToHop;
 
     hopOnScanCounter++;
     if (hopOnScanCounter >= channelsToHop)
     {
         hopOnScanCounter = 0;
         hopOnScanValue++;
-        if (hopOnScanValue >= framesPerHop)
-        {
-            hopOnScanValue = 0;
-        }
+        if (hopOnScanValue >= framesPerHop) hopOnScanValue = 0;
     }
 
     radio.stopListening();
@@ -249,10 +234,7 @@ bool RadioSlave::UpdateHop()
 {
     bool needsToHop = false;
     channelHopCounter++;
-    if (channelHopCounter >= framesPerHop)
-    {
-        channelHopCounter = 0;
-    }
+    if (channelHopCounter >= framesPerHop) channelHopCounter = 0;
 
     if (radioState == STATE_SCANNING)
     {
@@ -277,7 +259,7 @@ void RadioSlave::WaitAndSend()
 {
     while (!IsFrameReady())
     {
-        vTaskDelay(1); // Yield to other tasks
+        vTaskDelay(1);  // Yield to allow other tasks to run
     }
 
     bool hasStoppedListening = UpdateHop();
@@ -308,7 +290,7 @@ void RadioSlave::Receive()
     bool isSuccess = false;
     ClearReceivePackets();
 
-    for (int i = 0; i < 3; i++) // Always check 3 times to clear the input buffers otherwise interrupt won't trigger
+    for (int i = 0; i < 3; i++)  // Always check 3 times to clear the input buffers otherwise interrupt won't trigger
     {
         if (radio.available())
         {

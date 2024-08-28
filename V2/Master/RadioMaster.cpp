@@ -1,21 +1,7 @@
 #include "RadioMaster.h"
 
-RadioMaster::RadioMaster()
+void RadioMaster::Init(SPIClass* spiPort, uint8_t pinCE, uint8_t PinCS, int8_t powerLevel, uint8_t packetSize, uint8_t numberOfSendPackets, uint8_t numberOfReceivePackets, uint8_t frameRate)
 {
-    xSemaphore = xSemaphoreCreateMutex();
-}
-
-RadioMaster::~RadioMaster()
-{
-    if (xSemaphore != NULL)
-    {
-        vSemaphoreDelete(xSemaphore);
-    }
-}
-
-void RadioMaster::Init(SPIClass *spiPort, uint8_t pinCE, uint8_t PinCS, int8_t powerLevel, uint8_t packetSize, uint8_t numberOfSendPackets, uint8_t numberOfReceivePackets, uint8_t frameRate)
-{
-    // Packets initialization
     this->numberOfSendPackets = (numberOfSendPackets < 0) ? 0 : ((numberOfSendPackets > 3) ? 3 : numberOfSendPackets);
     this->numberOfReceivePackets = (numberOfReceivePackets < 0) ? 0 : ((numberOfReceivePackets > 3) ? 3 : numberOfReceivePackets);
     this->packetSize = (packetSize < 1) ? 1 : ((packetSize > 32) ? 32 : packetSize);
@@ -34,7 +20,7 @@ void RadioMaster::Init(SPIClass *spiPort, uint8_t pinCE, uint8_t PinCS, int8_t p
     ClearSendPackets();
     ClearReceivePackets();
 
-    // Radio setup
+    // Radio initialization
     spiPort->begin();
     radio.begin(spiPort, pinCE, PinCS);
     radio.stopListening();
@@ -52,32 +38,28 @@ void RadioMaster::Init(SPIClass *spiPort, uint8_t pinCE, uint8_t PinCS, int8_t p
     radio.powerUp();
     radio.startListening();
 
-    // Frame Timing setup
-    this->frameRate = (frameRate < 10) ? 10 : ((frameRate > 120) ? 120 : frameRate); // Clamp between 10 and 120
+    // Frame Timing
+    this->frameRate = (frameRate < 10) ? 10 : ((frameRate > 120) ? 120 : frameRate);
     microsPerFrame = 1000000 / frameRate;
 }
 
 void RadioMaster::ClearSendPackets()
 {
-    xSemaphoreTake(xSemaphore, portMAX_DELAY);
     for (int i = 0; i < numberOfSendPackets; i++)
     {
         memset(sendPackets[i], 0, packetSize);
         byteAddCounter[i] = 1;
     }
-    xSemaphoreGive(xSemaphore);
 }
 
 void RadioMaster::ClearReceivePackets()
 {
-    xSemaphoreTake(xSemaphore, portMAX_DELAY);
     for (int i = 0; i < numberOfReceivePackets; i++)
     {
         receivePacketsAvailable[i] = false;
         memset(receivePackets[i], 0, packetSize);
         byteReceiveCounter[i] = 1;
     }
-    xSemaphoreGive(xSemaphore);
 }
 
 void RadioMaster::AdvanceFrame()
@@ -123,7 +105,7 @@ void RadioMaster::WaitAndSend()
 {
     while (!IsFrameReady())
     {
-        vTaskDelay(1); // Yield to allow other tasks to run
+        vTaskDelay(1); // Yield to other tasks
     }
 
     radio.stopListening();

@@ -1,21 +1,8 @@
 #include "RadioSlave.h"
 
-RadioSlave *RadioSlave::handlerInstance = nullptr;
+RadioSlave* RadioSlave::handlerInstance = nullptr;
 
-RadioSlave::RadioSlave()
-{
-    xSemaphore = xSemaphoreCreateMutex();
-}
-
-RadioSlave::~RadioSlave()
-{
-    if (xSemaphore != NULL)
-    {
-        vSemaphoreDelete(xSemaphore);
-    }
-}
-
-void RadioSlave::Init(SPIClass *spiPort, uint8_t pinCE, uint8_t pinCS, uint8_t pinIRQ, int8_t powerLevel, uint8_t packetSize, uint8_t numberOfSendPackets, uint8_t numberOfReceivePackets, uint8_t frameRate)
+void RadioSlave::Init(SPIClass* spiPort, uint8_t pinCE, uint8_t pinCS, uint8_t pinIRQ, int8_t powerLevel, uint8_t packetSize, uint8_t numberOfSendPackets, uint8_t numberOfReceivePackets, uint8_t frameRate)
 {
     handlerInstance = this;
     this->numberOfSendPackets = (numberOfSendPackets < 0) ? 0 : ((numberOfSendPackets > 3) ? 3 : numberOfSendPackets);
@@ -36,7 +23,7 @@ void RadioSlave::Init(SPIClass *spiPort, uint8_t pinCE, uint8_t pinCS, uint8_t p
     ClearSendPackets();
     ClearReceivePackets();
 
-    // Radio setup
+    // Radio initialization
     spiPort->begin();
     radio.begin(spiPort, pinCE, pinCS);
     radio.stopListening();
@@ -57,8 +44,8 @@ void RadioSlave::Init(SPIClass *spiPort, uint8_t pinCE, uint8_t pinCS, uint8_t p
     // Interrupt for Radio
     attachInterrupt(digitalPinToInterrupt(pinIRQ), StaticIRQHandler, FALLING);
 
-    // Frame Timing setup
-    this->frameRate = (frameRate < 10) ? 10 : ((frameRate > 120) ? 120 : frameRate); // Clamp between 10 and 120
+    // Frame Timing
+    this->frameRate = (frameRate < 10) ? 10 : ((frameRate > 120) ? 120 : frameRate);
     microsPerFrame = 1000000 / frameRate;
     halfMicrosPerFrame = microsPerFrame / 2;
     minOverflowProtection = microsPerFrame * 3;
@@ -74,13 +61,12 @@ void RadioSlave::StaticIRQHandler()
     }
 }
 
-volatile uint32_t lastInterruptTimeStamp = 0;
-
 void RadioSlave::IRQHandler()
 {
     interruptTimeStamp = micros() + syncDelay;
 
-    if (interruptTimeStamp - lastInterruptTimeStamp < halfMicrosPerFrame) // In case our interrupt acted weird on multiple packets
+    // Prevent false triggers by checking the difference
+    if (interruptTimeStamp - lastInterruptTimeStamp < halfMicrosPerFrame)
     {
         return;
     }
@@ -91,25 +77,21 @@ void RadioSlave::IRQHandler()
 
 void RadioSlave::ClearSendPackets()
 {
-    xSemaphoreTake(xSemaphore, portMAX_DELAY);
     for (int i = 0; i < numberOfSendPackets; i++)
     {
         memset(sendPackets[i], 0, packetSize);
         byteAddCounter[i] = 1;
     }
-    xSemaphoreGive(xSemaphore);
 }
 
 void RadioSlave::ClearReceivePackets()
 {
-    xSemaphoreTake(xSemaphore, portMAX_DELAY);
     for (int i = 0; i < numberOfReceivePackets; i++)
     {
         receivePacketsAvailable[i] = false;
         memset(receivePackets[i], 0, packetSize);
         byteReceiveCounter[i] = 1;
     }
-    xSemaphoreGive(xSemaphore);
 }
 
 void RadioSlave::SetNextFrameEnd(uint32_t newTime)
@@ -295,7 +277,7 @@ void RadioSlave::WaitAndSend()
 {
     while (!IsFrameReady())
     {
-        vTaskDelay(1); // Yield to allow other tasks to run
+        vTaskDelay(1); // Yield to other tasks
     }
 
     bool hasStoppedListening = UpdateHop();

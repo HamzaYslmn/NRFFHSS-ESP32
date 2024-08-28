@@ -2,9 +2,9 @@
 #define RadioMaster_h
 
 #include <RF24.h>
+#include <SPI.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <freertos/semphr.h>
 
 #define MAXPACKETS 3
 #define PACKET1 0
@@ -14,7 +14,6 @@
 class RadioMaster
 {
 private:
-    // Radio attributes
     RF24 radio;
     int8_t channelList[40] = {15, 102, 87, 62, 95, 33, 100, 78, 81, 92, 26, 39, 105, 12, 36, 96, 60, 84, 21, 48, 90, 27, 75, 9, 70, 93, 18, 102, 81, 30, 63, 108, 48, 57, 36, 99, 78, 87, 38, 25};
     const uint8_t addressTransmit[4] = {'R', 'R', 'R', '\0'};
@@ -24,7 +23,7 @@ private:
     int8_t currentChannelIndex = 0;
     uint8_t channelHopCounter = 0;
 
-    // Frame Timing attributes
+    // Frame Timing Stuff
     uint8_t frameRate = 0;
     uint32_t microsPerFrame = 0;
     uint32_t frameTimeEnd = 0;
@@ -34,19 +33,16 @@ private:
     uint16_t receivedPerSecond = 0;
     bool isSecondTick = false;
 
-    // Packet Data attributes
+    // Packet Data
     uint8_t numberOfSendPackets = 0;
     uint8_t numberOfReceivePackets = 0;
-    uint8_t *receivePackets[MAXPACKETS];
-    uint8_t *sendPackets[MAXPACKETS];
+    uint8_t* receivePackets[MAXPACKETS];
+    uint8_t* sendPackets[MAXPACKETS];
     bool receivePacketsAvailable[MAXPACKETS];
     uint8_t byteAddCounter[MAXPACKETS];
     uint8_t byteReceiveCounter[MAXPACKETS];
     uint8_t packetSize = 0;
 
-    // Synchronization attributes
-    SemaphoreHandle_t xSemaphore;
-    
     void ClearSendPackets();
     void ClearReceivePackets();
     void UpdateRecording();
@@ -54,17 +50,19 @@ private:
     bool IsFrameReady();
 
 public:
-    RadioMaster();
-    ~RadioMaster();
-    void Init(SPIClass *spiPort, uint8_t pinCE, uint8_t PinCS, int8_t powerLevel, uint8_t packetSize, uint8_t numberOfSendPackets, uint8_t numberOfReceivePackets, uint8_t frameRate);
+    void Init(SPIClass* spiPort, uint8_t pinCE, uint8_t PinCS, int8_t powerLevel, uint8_t packetSize, uint8_t numberOfSendPackets, uint8_t numberOfReceivePackets, uint8_t frameRate);
     void WaitAndSend();
     void Receive();
     bool IsNewPacket(uint8_t packetId) { return receivePacketsAvailable[packetId]; }
-    int16_t GetRecievedPacketsPerSecond() { return receivedPerSecond; }
+    uint16_t GetReceivedPacketsPerSecond() { return receivedPerSecond; }
     int8_t GetCurrentChannel() { return channelList[currentChannelIndex]; }
     bool IsSecondTick() { return isSecondTick; }
-    template <typename T> void AddNextPacketValue(uint8_t packetId, T data);
-    template <typename T> T GetNextPacketValue(uint8_t packetId);
+
+    template <typename T>
+    void AddNextPacketValue(uint8_t packetId, T data);
+
+    template <typename T>
+    T GetNextPacketValue(uint8_t packetId);
 };
 
 template <typename T>
@@ -81,10 +79,8 @@ void RadioMaster::AddNextPacketValue(uint8_t packetId, T data)
         return;
     }
 
-    xSemaphoreTake(xSemaphore, portMAX_DELAY);
     memcpy(&sendPackets[packetId][byteAddCounter[packetId]], &data, dataLength);
     byteAddCounter[packetId] += dataLength;
-    xSemaphoreGive(xSemaphore);
 }
 
 template <typename T>
@@ -103,10 +99,8 @@ T RadioMaster::GetNextPacketValue(uint8_t packetId)
     }
 
     T value;
-    xSemaphoreTake(xSemaphore, portMAX_DELAY);
     memcpy(&value, &receivePackets[packetId][byteReceiveCounter[packetId]], dataLength);
     byteReceiveCounter[packetId] += dataLength;
-    xSemaphoreGive(xSemaphore);
     return value;
 }
 

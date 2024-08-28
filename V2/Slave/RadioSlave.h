@@ -2,9 +2,9 @@
 #define RadioSlave_h
 
 #include <RF24.h>
+#include <SPI.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <freertos/semphr.h>
 
 #define MAXPACKETS 3
 #define PACKET1 0
@@ -18,8 +18,7 @@
 class RadioSlave
 {
 private:
-    static RadioSlave *handlerInstance;
-    // Radio attributes
+    static RadioSlave* handlerInstance;
     RF24 radio;
     int8_t channelList[40] = {15, 102, 87, 62, 95, 33, 100, 78, 81, 92, 26, 39, 105, 12, 36, 96, 60, 84, 21, 48, 90, 27, 75, 9, 70, 93, 18, 102, 81, 30, 63, 108, 48, 57, 36, 99, 78, 87, 38, 25};
     const uint8_t addressRec[4] = {'R', 'R', 'R', '\0'};
@@ -34,10 +33,10 @@ private:
     uint8_t failedCounter = 0;
     const uint8_t failedBeforeScanning = 50;
 
-    // Frame Timing attributes
+    // Frame Timing Stuff
     uint8_t frameRate = 0;
     uint32_t microsPerFrame = 0;
-    volatile uint32_t halfMicrosPerFrame = 0;
+    uint32_t halfMicrosPerFrame = 0;
     uint32_t frameTimeEnd = 0;
     bool isOverFlowFrame = false;
     uint8_t secondCounter = 0;
@@ -47,17 +46,17 @@ private:
     uint16_t sentPerSecond = 0;
     bool isSecondTick = false;
 
-    // Packet Data attributes
+    // Packet Data
     uint8_t numberOfSendPackets = 0;
     uint8_t numberOfReceivePackets = 0;
-    uint8_t *receivePackets[MAXPACKETS];
-    uint8_t *sendPackets[MAXPACKETS];
+    uint8_t* receivePackets[MAXPACKETS];
+    uint8_t* sendPackets[MAXPACKETS];
     bool receivePacketsAvailable[MAXPACKETS];
     uint8_t byteAddCounter[MAXPACKETS];
     uint8_t byteReceiveCounter[MAXPACKETS];
     uint8_t packetSize = 0;
 
-    // Radio Interrupt attributes
+    // Radio Interrupt Stuff
     int16_t totalAdjustedDrift = 0;
     uint32_t syncDelay = 0;
     uint32_t minOverflowProtection;
@@ -66,8 +65,7 @@ private:
     volatile uint8_t radioState = STATE_SCANNING;
     volatile bool isSyncFrame;
     volatile uint32_t interruptTimeStamp = 0;
-
-    SemaphoreHandle_t xSemaphore;
+    volatile uint32_t lastInterruptTimeStamp = 0;
 
     void ClearSendPackets();
     void ClearReceivePackets();
@@ -82,18 +80,20 @@ private:
     void IRQHandler();
 
 public:
-    RadioSlave();
-    ~RadioSlave();
-    void Init(SPIClass *spiPort, uint8_t pinCE, uint8_t pinCS, uint8_t pinIRQ, int8_t powerLevel, uint8_t packetSize, uint8_t numberOfSendPackets, uint8_t numberOfReceivePackets, uint8_t frameRate);
+    void Init(SPIClass* spiPort, uint8_t pinCE, uint8_t pinCS, uint8_t pinIRQ, int8_t powerLevel, uint8_t packetSize, uint8_t numberOfSendPackets, uint8_t numberOfReceivePackets, uint8_t frameRate);
     void WaitAndSend();
     void Receive();
     bool IsNewPacket(uint8_t packetId) { return receivePacketsAvailable[packetId]; }
-    uint16_t GetRecievedPacketsPerSecond() { return receivedPerSecond; }
+    uint16_t GetReceivedPacketsPerSecond() { return receivedPerSecond; }
     int16_t GetDriftAdjustmentMicros() { return totalAdjustedDrift; }
     int8_t GetCurrentChannel() { return channelList[currentChannelIndex]; }
     bool IsSecondTick() { return isSecondTick; }
-    template <typename T> void AddNextPacketValue(uint8_t packetId, T data);
-    template <typename T> T GetNextPacketValue(uint8_t packetId);
+
+    template <typename T>
+    void AddNextPacketValue(uint8_t packetId, T data);
+
+    template <typename T>
+    T GetNextPacketValue(uint8_t packetId);
 };
 
 template <typename T>
@@ -111,10 +111,8 @@ void RadioSlave::AddNextPacketValue(uint8_t packetId, T data)
         return;
     }
 
-    xSemaphoreTake(xSemaphore, portMAX_DELAY);
     memcpy(&sendPackets[packetId][byteAddCounter[packetId]], &data, dataLength);
     byteAddCounter[packetId] += dataLength;
-    xSemaphoreGive(xSemaphore);
 }
 
 template <typename T>
@@ -133,10 +131,8 @@ T RadioSlave::GetNextPacketValue(uint8_t packetId)
     }
 
     T value;
-    xSemaphoreTake(xSemaphore, portMAX_DELAY);
     memcpy(&value, &receivePackets[packetId][byteReceiveCounter[packetId]], dataLength);
     byteReceiveCounter[packetId] += dataLength;
-    xSemaphoreGive(xSemaphore);
     return value;
 }
 

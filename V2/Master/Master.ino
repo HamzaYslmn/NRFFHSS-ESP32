@@ -49,7 +49,7 @@ void masterTask(void *pvParameters) {
         if (radio.IsSecondTick()) {
             // Print out received data in a human-readable format
             String dataString = "---- Master Received Data ----\n";
-            dataString += "Slave/Master Rec. Per Second: " + String(lastSlaveRecPerSecond) + " | " + String(radio.GetRecievedPacketsPerSecond()) + "\n";
+            dataString += "Slave/Master Rec. Per Second: " + String(lastSlaveRecPerSecond) + " | " + String(radio.GetReceivedPacketsPerSecond()) + "\n";
             dataString += "Received 16-bit value: " + String(lastNumber16Bit) + "\n";
             dataString += "Received 8-bit value: " + String(lastNumberU8Bit) + "\n";
             dataString += "Received Float: " + String(lastNumberFloat, 2) + "\n";
@@ -73,7 +73,7 @@ void AddSendData() {
     // Eg for 4 x int16_t values we need 8 bytes + 1. So PACKET_SIZE should be 9 bytes
     // Both Master and Slave need to have the same PACKET_SIZE. Not all bytes need to be used in each packet
 
-    int16_t masterRecPerSecond = radio.GetRecievedPacketsPerSecond();
+    int16_t masterRecPerSecond = radio.GetReceivedPacketsPerSecond();
     uint32_t masterMicros = micros();
     uint16_t value2 = 5343;
     uint8_t value3 = 143; 

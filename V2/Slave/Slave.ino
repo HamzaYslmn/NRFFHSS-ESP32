@@ -56,7 +56,7 @@ void slaveTask(void *pvParameters) {
 }
 
 void AddSendData() {
-    int16_t slaveRecPerSecond = radio.GetReceivedPacketsPerSecond();  // Get the number of Packets we are receiving per second
+    int16_t slaveRecPerSecond = radio.GetRecievedPacketsPerSecond();  // Get the number of Packets we are receiving per second
     int16_t number16Bit = 23145;      // Useless variable we will send
     uint8_t numberU8Bit = 50;         // Useless variable we will send
     float numberFloat = 302.234f;     // Useless variable we will send

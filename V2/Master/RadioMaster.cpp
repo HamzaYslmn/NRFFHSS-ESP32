@@ -1,24 +1,42 @@
 #include "RadioMaster.h"
 
-void RadioMaster::Init(SPIClass* spiPort, uint8_t pinCE, uint8_t pinCS, int8_t powerLevel, uint8_t packetSize, uint8_t numberOfSendPackets, uint8_t numberOfReceivePackets, uint8_t frameRate) {
-    this->numberOfSendPackets = constrain(numberOfSendPackets, 0, 3);
-    this->numberOfReceivePackets = constrain(numberOfReceivePackets, 0, 3);
-    this->packetSize = constrain(packetSize, 1, 32);
-    powerLevel = constrain(powerLevel, 0, 3);
+RadioMaster::RadioMaster()
+{
+    xSemaphore = xSemaphoreCreateMutex();
+}
 
-    for (int i = 0; i < this->numberOfSendPackets; ++i) {
+RadioMaster::~RadioMaster()
+{
+    if (xSemaphore != NULL)
+    {
+        vSemaphoreDelete(xSemaphore);
+    }
+}
+
+void RadioMaster::Init(SPIClass *spiPort, uint8_t pinCE, uint8_t PinCS, int8_t powerLevel, uint8_t packetSize, uint8_t numberOfSendPackets, uint8_t numberOfReceivePackets, uint8_t frameRate)
+{
+    // Packets initialization
+    this->numberOfSendPackets = (numberOfSendPackets < 0) ? 0 : ((numberOfSendPackets > 3) ? 3 : numberOfSendPackets);
+    this->numberOfReceivePackets = (numberOfReceivePackets < 0) ? 0 : ((numberOfReceivePackets > 3) ? 3 : numberOfReceivePackets);
+    this->packetSize = (packetSize < 1) ? 1 : ((packetSize > 32) ? 32 : packetSize);
+    powerLevel = (powerLevel < 0) ? 0 : ((powerLevel > 3) ? 3 : powerLevel);
+
+    for (int i = 0; i < numberOfSendPackets; ++i)
+    {
         sendPackets[i] = new uint8_t[packetSize]();
     }
 
-    for (int i = 0; i < this->numberOfReceivePackets; ++i) {
+    for (int i = 0; i < numberOfReceivePackets; ++i)
+    {
         receivePackets[i] = new uint8_t[packetSize]();
     }
 
     ClearSendPackets();
     ClearReceivePackets();
 
+    // Radio setup
     spiPort->begin();
-    radio.begin(spiPort, pinCE, pinCS);
+    radio.begin(spiPort, pinCE, PinCS);
     radio.stopListening();
     radio.powerDown();
     radio.setPALevel(powerLevel);
@@ -34,51 +52,66 @@ void RadioMaster::Init(SPIClass* spiPort, uint8_t pinCE, uint8_t pinCS, int8_t p
     radio.powerUp();
     radio.startListening();
 
-    this->frameRate = constrain(frameRate, 10, 120);
+    // Frame Timing setup
+    this->frameRate = (frameRate < 10) ? 10 : ((frameRate > 120) ? 120 : frameRate); // Clamp between 10 and 120
     microsPerFrame = 1000000 / frameRate;
 }
 
-void RadioMaster::ClearSendPackets() {
-    for (int i = 0; i < numberOfSendPackets; i++) {
+void RadioMaster::ClearSendPackets()
+{
+    xSemaphoreTake(xSemaphore, portMAX_DELAY);
+    for (int i = 0; i < numberOfSendPackets; i++)
+    {
         memset(sendPackets[i], 0, packetSize);
         byteAddCounter[i] = 1;
     }
+    xSemaphoreGive(xSemaphore);
 }
 
-void RadioMaster::ClearReceivePackets() {
-    for (int i = 0; i < numberOfReceivePackets; i++) {
+void RadioMaster::ClearReceivePackets()
+{
+    xSemaphoreTake(xSemaphore, portMAX_DELAY);
+    for (int i = 0; i < numberOfReceivePackets; i++)
+    {
         receivePacketsAvailable[i] = false;
         memset(receivePackets[i], 0, packetSize);
         byteReceiveCounter[i] = 1;
     }
+    xSemaphoreGive(xSemaphore);
 }
 
-void RadioMaster::AdvanceFrame() {
+void RadioMaster::AdvanceFrame()
+{
     uint32_t newTime = frameTimeEnd + microsPerFrame;
     isOverFlowFrame = (newTime < frameTimeEnd);
     frameTimeEnd = newTime;
 }
 
-bool RadioMaster::IsFrameReady() {
+bool RadioMaster::IsFrameReady()
+{
     uint32_t currentTimeStamp = micros();
     uint32_t localFrameTimeEnd = frameTimeEnd;
 
-    if (isOverFlowFrame) {
+    if (isOverFlowFrame)
+    {
         currentTimeStamp -= 0x80000000;
         localFrameTimeEnd -= 0x80000000;
     }
 
-    if (currentTimeStamp >= localFrameTimeEnd) {
+    if (currentTimeStamp >= localFrameTimeEnd)
+    {
         AdvanceFrame();
         return true;
     }
     return false;
 }
 
-void RadioMaster::UpdateRecording() {
+void RadioMaster::UpdateRecording()
+{
     secondCounter++;
     isSecondTick = false;
-    if (secondCounter >= frameRate) {
+    if (secondCounter >= frameRate)
+    {
         secondCounter = 0;
         receivedPerSecond = receivedPacketCount;
         receivedPacketCount = 0;
@@ -86,24 +119,29 @@ void RadioMaster::UpdateRecording() {
     }
 }
 
-void RadioMaster::WaitAndSend() {
-    while (!IsFrameReady()) {
-        taskYIELD();  // Allow other tasks to run, preventing watchdog timer errors
+void RadioMaster::WaitAndSend()
+{
+    while (!IsFrameReady())
+    {
+        vTaskDelay(1); // Yield to allow other tasks to run
     }
 
     radio.stopListening();
 
-    for (int i = 0; i < numberOfSendPackets; i++) {
+    for (int i = 0; i < numberOfSendPackets; i++)
+    {
         sendPackets[i][0] = i;
         sendPackets[i][0] |= ((channelHopCounter << 5) & 0xE0);
         radio.write(sendPackets[i], packetSize);
     }
 
     channelHopCounter++;
-    if (channelHopCounter >= framesPerHop) {
+    if (channelHopCounter >= framesPerHop)
+    {
         channelHopCounter = 0;
         currentChannelIndex++;
-        if (currentChannelIndex >= channelsToHop) {
+        if (currentChannelIndex >= channelsToHop)
+        {
             currentChannelIndex = 0;
         }
         radio.setChannel(channelList[currentChannelIndex]);
@@ -113,11 +151,14 @@ void RadioMaster::WaitAndSend() {
     ClearSendPackets();
 }
 
-void RadioMaster::Receive() {
+void RadioMaster::Receive()
+{
     ClearReceivePackets();
 
-    for (int i = 0; i < 3; i++) {  // Always check 3 times to clear the input buffers
-        if (radio.available()) {
+    for (int i = 0; i < 3; i++) // Always check 3 times to clear the input buffers
+    {
+        if (radio.available())
+        {
             receivedPacketCount++;
             uint8_t currentPacket[packetSize];
             radio.read(currentPacket, packetSize);

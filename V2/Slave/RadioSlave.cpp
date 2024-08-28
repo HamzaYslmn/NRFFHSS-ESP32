@@ -1,25 +1,42 @@
 #include "RadioSlave.h"
 
-RadioSlave* RadioSlave::handlerInstance = nullptr;
+RadioSlave *RadioSlave::handlerInstance = nullptr;
 
-void RadioSlave::Init(SPIClass* spiPort, uint8_t pinCE, uint8_t pinCS, uint8_t pinIRQ, int8_t powerLevel, uint8_t packetSize, uint8_t numberOfSendPackets, uint8_t numberOfReceivePackets, uint8_t frameRate) {
+RadioSlave::RadioSlave()
+{
+    xSemaphore = xSemaphoreCreateMutex();
+}
+
+RadioSlave::~RadioSlave()
+{
+    if (xSemaphore != NULL)
+    {
+        vSemaphoreDelete(xSemaphore);
+    }
+}
+
+void RadioSlave::Init(SPIClass *spiPort, uint8_t pinCE, uint8_t pinCS, uint8_t pinIRQ, int8_t powerLevel, uint8_t packetSize, uint8_t numberOfSendPackets, uint8_t numberOfReceivePackets, uint8_t frameRate)
+{
     handlerInstance = this;
-    this->numberOfSendPackets = constrain(numberOfSendPackets, 0, 3);
-    this->numberOfReceivePackets = constrain(numberOfReceivePackets, 0, 3);
-    this->packetSize = constrain(packetSize, 1, 32);
-    powerLevel = constrain(powerLevel, 0, 3);
+    this->numberOfSendPackets = (numberOfSendPackets < 0) ? 0 : ((numberOfSendPackets > 3) ? 3 : numberOfSendPackets);
+    this->numberOfReceivePackets = (numberOfReceivePackets < 0) ? 0 : ((numberOfReceivePackets > 3) ? 3 : numberOfReceivePackets);
+    this->packetSize = (packetSize < 1) ? 1 : ((packetSize > 32) ? 32 : packetSize);
+    powerLevel = (powerLevel < 0) ? 0 : ((powerLevel > 3) ? 3 : powerLevel);
 
-    for (int i = 0; i < this->numberOfSendPackets; ++i) {
+    for (int i = 0; i < numberOfSendPackets; ++i)
+    {
         sendPackets[i] = new uint8_t[packetSize]();
     }
 
-    for (int i = 0; i < this->numberOfReceivePackets; ++i) {
+    for (int i = 0; i < numberOfReceivePackets; ++i)
+    {
         receivePackets[i] = new uint8_t[packetSize]();
     }
 
     ClearSendPackets();
     ClearReceivePackets();
 
+    // Radio setup
     spiPort->begin();
     radio.begin(spiPort, pinCE, pinCS);
     radio.stopListening();
@@ -37,72 +54,85 @@ void RadioSlave::Init(SPIClass* spiPort, uint8_t pinCE, uint8_t pinCS, uint8_t p
     radio.powerUp();
     radio.startListening();
 
+    // Interrupt for Radio
     attachInterrupt(digitalPinToInterrupt(pinIRQ), StaticIRQHandler, FALLING);
 
-    this->frameRate = constrain(frameRate, 10, 120);
+    // Frame Timing setup
+    this->frameRate = (frameRate < 10) ? 10 : ((frameRate > 120) ? 120 : frameRate); // Clamp between 10 and 120
     microsPerFrame = 1000000 / frameRate;
     halfMicrosPerFrame = microsPerFrame / 2;
     minOverflowProtection = microsPerFrame * 3;
     maxOverflowProtection = 0xffffffff - (microsPerFrame * 3);
     syncDelay = microsPerFrame / 8;
-
-    xSemaphore = xSemaphoreCreateBinary();
-    if (xSemaphore == NULL) {
-        Serial.println("Failed to create semaphore!");
-        while (1);
-    }
 }
 
-void RadioSlave::StaticIRQHandler() {
-    if (handlerInstance != nullptr) {
+void RadioSlave::StaticIRQHandler()
+{
+    if (handlerInstance != nullptr)
+    {
         handlerInstance->IRQHandler();
     }
 }
 
-void RadioSlave::IRQHandler() {
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+volatile uint32_t lastInterruptTimeStamp = 0;
+
+void RadioSlave::IRQHandler()
+{
     interruptTimeStamp = micros() + syncDelay;
 
-    if (interruptTimeStamp - lastInterruptTimeStamp < halfMicrosPerFrame) {
+    if (interruptTimeStamp - lastInterruptTimeStamp < halfMicrosPerFrame) // In case our interrupt acted weird on multiple packets
+    {
         return;
     }
 
     isSyncFrame = true;
     lastInterruptTimeStamp = interruptTimeStamp;
-
-    xSemaphoreGiveFromISR(xSemaphore, &xHigherPriorityTaskWoken);
-    if (xHigherPriorityTaskWoken == pdTRUE) {
-        portYIELD_FROM_ISR();
-    }
 }
 
-void RadioSlave::ClearSendPackets() {
-    for (int i = 0; i < numberOfSendPackets; i++) {
+void RadioSlave::ClearSendPackets()
+{
+    xSemaphoreTake(xSemaphore, portMAX_DELAY);
+    for (int i = 0; i < numberOfSendPackets; i++)
+    {
         memset(sendPackets[i], 0, packetSize);
         byteAddCounter[i] = 1;
     }
+    xSemaphoreGive(xSemaphore);
 }
 
-void RadioSlave::ClearReceivePackets() {
-    for (int i = 0; i < numberOfReceivePackets; i++) {
+void RadioSlave::ClearReceivePackets()
+{
+    xSemaphoreTake(xSemaphore, portMAX_DELAY);
+    for (int i = 0; i < numberOfReceivePackets; i++)
+    {
         receivePacketsAvailable[i] = false;
         memset(receivePackets[i], 0, packetSize);
         byteReceiveCounter[i] = 1;
     }
+    xSemaphoreGive(xSemaphore);
 }
 
-void RadioSlave::SetNextFrameEnd(uint32_t newTime) {
+void RadioSlave::SetNextFrameEnd(uint32_t newTime)
+{
     isOverFlowFrame = (newTime < frameTimeEnd);
     frameTimeEnd = newTime;
 }
 
-void RadioSlave::AdvanceFrame() {
+void RadioSlave::AdvanceFrame()
+{
     uint32_t localInterruptTimeStamp = interruptTimeStamp;
     bool localIsSyncFrame = isSyncFrame;
     isSyncFrame = false;
 
-    if (localIsSyncFrame) {
-        if (localInterruptTimeStamp > maxOverflowProtection || localInterruptTimeStamp < minOverflowProtection) {
+    if (localIsSyncFrame)
+    {
+        if (localInterruptTimeStamp > maxOverflowProtection)
+        {
+            SetNextFrameEnd(frameTimeEnd + microsPerFrame);
+            return;
+        }
+        if (localInterruptTimeStamp < minOverflowProtection)
+        {
             SetNextFrameEnd(frameTimeEnd + microsPerFrame);
             return;
         }
@@ -110,31 +140,41 @@ void RadioSlave::AdvanceFrame() {
         uint32_t futureLocalInterruptTimeStamp = localInterruptTimeStamp + microsPerFrame;
         int32_t diffA = localInterruptTimeStamp - frameTimeEnd;
         int32_t diffB = futureLocalInterruptTimeStamp - frameTimeEnd;
-        int32_t drift = (abs(diffA) < abs(diffB)) ? diffA : diffB;
+        int32_t drift;
+
+        drift = (abs(diffA) < abs(diffB)) ? diffA : diffB;
 
         SetNextFrameEnd(frameTimeEnd + microsPerFrame + drift);
-        if (drift < 0) {
+        if (drift < 0)
+        {
             totalAdjustedDrift--;
             microsPerFrame--;
-        } else {
+        }
+        else
+        {
             totalAdjustedDrift++;
             microsPerFrame++;
         }
-    } else {
+    }
+    else
+    {
         SetNextFrameEnd(frameTimeEnd + microsPerFrame);
     }
 }
 
-bool RadioSlave::IsFrameReady() {
+bool RadioSlave::IsFrameReady()
+{
     uint32_t currentTimeStamp = micros();
     uint32_t localFrameTimeEnd = frameTimeEnd;
 
-    if (isOverFlowFrame) {
+    if (isOverFlowFrame)
+    {
         currentTimeStamp -= 0x80000000;
         localFrameTimeEnd -= 0x80000000;
     }
 
-    if (currentTimeStamp >= localFrameTimeEnd) {
+    if (currentTimeStamp >= localFrameTimeEnd)
+    {
         AdvanceFrame();
         return true;
     }
@@ -142,36 +182,50 @@ bool RadioSlave::IsFrameReady() {
     return false;
 }
 
-void RadioSlave::UpdateScanning(bool isSuccess) {
-    if (isSuccess) {
-        if (radioState == STATE_SCANNING) {
+void RadioSlave::UpdateScanning(bool isSuccess)
+{
+    if (isSuccess)
+    {
+        if (radioState == STATE_SCANNING)
+        {
             AdjustChannelIndex(2);
             radio.startListening();
             radioState = STATE_PARTIAL_LOCK;
             partialLockCounter = 0;
-        } else if (radioState == STATE_PARTIAL_LOCK) {
+        }
+        else if (radioState == STATE_PARTIAL_LOCK)
+        {
             partialLockCounter++;
 
-            if (partialLockCounter > 10) {
-                radioState = STATE_SCANNING;
-            } else if (isSuccess) {
+            if (isSuccess)
+            {
                 radioState = STATE_FULL_LOCK;
             }
+
+            if (partialLockCounter > 10)
+            {
+                radioState = STATE_SCANNING;
+            }
         }
-    } else {
+    }
+    else
+    {
         failedCounter++;
     }
 
-    if (failedCounter >= failedBeforeScanning) {
+    if (failedCounter >= failedBeforeScanning)
+    {
         failedCounter = 0;
         radioState = STATE_SCANNING;
     }
 }
 
-void RadioSlave::UpdateSecondCounter() {
+void RadioSlave::UpdateSecondCounter()
+{
     secondCounter++;
     isSecondTick = false;
-    if (secondCounter >= frameRate) {
+    if (secondCounter >= frameRate)
+    {
         secondCounter = 0;
         receivedPerSecond = receivedPacketCount;
         receivedPacketCount = 0;
@@ -181,20 +235,26 @@ void RadioSlave::UpdateSecondCounter() {
     }
 }
 
-void RadioSlave::AdjustChannelIndex(int8_t amount) {
+void RadioSlave::AdjustChannelIndex(int8_t amount)
+{
     currentChannelIndex += amount;
 
-    if (currentChannelIndex >= channelsToHop) {
+    if (currentChannelIndex >= channelsToHop)
+    {
         currentChannelIndex = channelsToHop - currentChannelIndex;
-    } else if (currentChannelIndex < 0) {
+    }
+    if (currentChannelIndex < 0)
+    {
         currentChannelIndex += channelsToHop;
     }
 
     hopOnScanCounter++;
-    if (hopOnScanCounter >= channelsToHop) {
+    if (hopOnScanCounter >= channelsToHop)
+    {
         hopOnScanCounter = 0;
         hopOnScanValue++;
-        if (hopOnScanValue >= framesPerHop) {
+        if (hopOnScanValue >= framesPerHop)
+        {
             hopOnScanValue = 0;
         }
     }
@@ -203,20 +263,27 @@ void RadioSlave::AdjustChannelIndex(int8_t amount) {
     radio.setChannel(channelList[currentChannelIndex]);
 }
 
-bool RadioSlave::UpdateHop() {
+bool RadioSlave::UpdateHop()
+{
     bool needsToHop = false;
     channelHopCounter++;
-    if (channelHopCounter >= framesPerHop) {
+    if (channelHopCounter >= framesPerHop)
+    {
         channelHopCounter = 0;
     }
 
-    if (radioState == STATE_SCANNING) {
-        if (channelHopCounter == hopOnScanValue) {
+    if (radioState == STATE_SCANNING)
+    {
+        if (channelHopCounter == hopOnScanValue)
+        {
             AdjustChannelIndex(-1);
             needsToHop = true;
         }
-    } else if (radioState == STATE_FULL_LOCK) {
-        if (channelHopCounter == hopOnLockValue) {
+    }
+    else if (radioState == STATE_FULL_LOCK)
+    {
+        if (channelHopCounter == hopOnLockValue)
+        {
             AdjustChannelIndex(1);
             needsToHop = true;
         }
@@ -224,36 +291,45 @@ bool RadioSlave::UpdateHop() {
     return needsToHop;
 }
 
-void RadioSlave::WaitAndSend() {
-    while (!IsFrameReady()) {
-        taskYIELD();  // Allow other tasks to run, preventing watchdog timer errors
+void RadioSlave::WaitAndSend()
+{
+    while (!IsFrameReady())
+    {
+        vTaskDelay(1); // Yield to allow other tasks to run
     }
 
     bool hasStoppedListening = UpdateHop();
-    if (radioState == STATE_FULL_LOCK) {
-        if (!hasStoppedListening) {
+    if (radioState == STATE_FULL_LOCK)
+    {
+        if (!hasStoppedListening)
+        {
             radio.stopListening();
             hasStoppedListening = true;
         }
-        for (int i = 0; i < numberOfSendPackets; i++) {
+        for (int i = 0; i < numberOfSendPackets; i++)
+        {
             sendPackets[i][0] = i;
             radio.write(sendPackets[i], packetSize);
         }
     }
 
-    if (hasStoppedListening) {
+    if (hasStoppedListening)
+    {
         radio.startListening();
     }
 
     ClearSendPackets();
 }
 
-void RadioSlave::Receive() {
+void RadioSlave::Receive()
+{
     bool isSuccess = false;
     ClearReceivePackets();
 
-    for (int i = 0; i < 3; i++) {  // Always check 3 times to clear the input buffers
-        if (radio.available()) {
+    for (int i = 0; i < 3; i++) // Always check 3 times to clear the input buffers otherwise interrupt won't trigger
+    {
+        if (radio.available())
+        {
             isSuccess = true;
             receivedPacketCount++;
             failedCounter = 0;

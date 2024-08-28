@@ -1,25 +1,30 @@
 #include "RadioSlave.h"
 
-RadioSlave* RadioSlave::handlerInstance = nullptr;
+RadioSlave *RadioSlave::handlerInstance = nullptr;
 
-void RadioSlave::Init(_SPI* spiPort, uint8_t pinCE, uint8_t pinCS, uint8_t pinIRQ, int8_t powerLevel, uint8_t packetSize, uint8_t numberOfSendPackets, uint8_t numberOfReceivePackets, uint8_t frameRate)
+void RadioSlave::Init(_SPI *spiPort, uint8_t pinCE, uint8_t pinCS, uint8_t pinIRQ, int8_t powerLevel, uint8_t packetSize, uint8_t numberOfSendPackets, uint8_t numberOfReceivePackets, uint8_t frameRate)
 {
     handlerInstance = this;
+    radioMutex = xSemaphoreCreateMutex();
+
     this->numberOfSendPackets = (numberOfSendPackets < 0) ? 0 : ((numberOfSendPackets > 3) ? 3 : numberOfSendPackets);
     this->numberOfReceivePackets = (numberOfReceivePackets < 0) ? 0 : ((numberOfReceivePackets > 3) ? 3 : numberOfReceivePackets);
     this->packetSize = (packetSize < 1) ? 1 : ((packetSize > 32) ? 32 : packetSize);
-    powerLevel = (powerLevel < 0) ? 0 : ((powerLevel > 3) ? 3: powerLevel);
+    powerLevel = (powerLevel < 0) ? 0 : ((powerLevel > 3) ? 3 : powerLevel);
 
     for (int i = 0; i < numberOfSendPackets; ++i)
+    {
         sendPackets[i] = new uint8_t[packetSize]();
+    }
 
     for (int i = 0; i < numberOfReceivePackets; ++i)
+    {
         receivePackets[i] = new uint8_t[packetSize]();
+    }
 
     ClearSendPackets();
     ClearReceivePackets();
 
-    // Initialize Radio
     spiPort->begin();
     radio.begin(spiPort, pinCE, pinCS);
     radio.stopListening();
@@ -37,10 +42,8 @@ void RadioSlave::Init(_SPI* spiPort, uint8_t pinCE, uint8_t pinCS, uint8_t pinIR
     radio.powerUp();
     radio.startListening();
 
-    // Attach Interrupt for Radio
     attachInterrupt(digitalPinToInterrupt(pinIRQ), StaticIRQHandler, FALLING);
 
-    // Frame Timing
     this->frameRate = (frameRate < 10) ? 10 : ((frameRate > 120) ? 120 : frameRate);
     microsPerFrame = 1000000 / frameRate;
     halfMicrosPerFrame = microsPerFrame / 2;
@@ -63,7 +66,10 @@ void RadioSlave::IRQHandler()
 {
     interruptTimeStamp = micros() + syncDelay;
 
-    if (interruptTimeStamp - lastInterruptTimeStamp < halfMicrosPerFrame) return;
+    if (interruptTimeStamp - lastInterruptTimeStamp < halfMicrosPerFrame)
+    {
+        return;
+    }
 
     isSyncFrame = true;
     lastInterruptTimeStamp = interruptTimeStamp;
@@ -215,15 +221,24 @@ void RadioSlave::AdjustChannelIndex(int8_t amount)
 {
     currentChannelIndex += amount;
 
-    if (currentChannelIndex >= channelsToHop) currentChannelIndex = channelsToHop - currentChannelIndex;
-    if (currentChannelIndex < 0) currentChannelIndex += channelsToHop;
+    if (currentChannelIndex >= channelsToHop)
+    {
+        currentChannelIndex = channelsToHop - currentChannelIndex;
+    }
+    if (currentChannelIndex < 0)
+    {
+        currentChannelIndex += channelsToHop;
+    }
 
     hopOnScanCounter++;
     if (hopOnScanCounter >= channelsToHop)
     {
         hopOnScanCounter = 0;
         hopOnScanValue++;
-        if (hopOnScanValue >= framesPerHop) hopOnScanValue = 0;
+        if (hopOnScanValue >= framesPerHop)
+        {
+            hopOnScanValue = 0;
+        }
     }
 
     radio.stopListening();
@@ -234,7 +249,10 @@ bool RadioSlave::UpdateHop()
 {
     bool needsToHop = false;
     channelHopCounter++;
-    if (channelHopCounter >= framesPerHop) channelHopCounter = 0;
+    if (channelHopCounter >= framesPerHop)
+    {
+        channelHopCounter = 0;
+    }
 
     if (radioState == STATE_SCANNING)
     {
@@ -257,9 +275,10 @@ bool RadioSlave::UpdateHop()
 
 void RadioSlave::WaitAndSend()
 {
+    xSemaphoreTake(radioMutex, portMAX_DELAY);
     while (!IsFrameReady())
     {
-        vTaskDelay(1);  // Yield to allow other tasks to run
+        taskYIELD();
     }
 
     bool hasStoppedListening = UpdateHop();
@@ -283,14 +302,16 @@ void RadioSlave::WaitAndSend()
     }
 
     ClearSendPackets();
+    xSemaphoreGive(radioMutex);
 }
 
 void RadioSlave::Receive()
 {
+    xSemaphoreTake(radioMutex, portMAX_DELAY);
     bool isSuccess = false;
     ClearReceivePackets();
 
-    for (int i = 0; i < 3; i++)  // Always check 3 times to clear the input buffers otherwise interrupt won't trigger
+    for (int i = 0; i < 3; i++)
     {
         if (radio.available())
         {
@@ -310,4 +331,5 @@ void RadioSlave::Receive()
 
     UpdateScanning(isSuccess);
     UpdateSecondCounter();
+    xSemaphoreGive(radioMutex);
 }

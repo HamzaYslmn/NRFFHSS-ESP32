@@ -1,26 +1,29 @@
 #include "RadioMaster.h"
 
-void RadioMaster::Init(_SPI* spiPort, uint8_t pinCE, uint8_t pinCS, int8_t powerLevel, uint8_t packetSize, uint8_t numberOfSendPackets, uint8_t numberOfReceivePackets, uint8_t frameRate)
+void RadioMaster::Init(_SPI *spiPort, uint8_t pinCE, uint8_t PinCS, int8_t powerLevel, uint8_t packetSize, uint8_t numberOfSendPackets, uint8_t numberOfReceivePackets, uint8_t frameRate)
 {
-    // Set up packet and power levels
+    radioMutex = xSemaphoreCreateMutex();
+
     this->numberOfSendPackets = (numberOfSendPackets < 0) ? 0 : ((numberOfSendPackets > 3) ? 3 : numberOfSendPackets);
     this->numberOfReceivePackets = (numberOfReceivePackets < 0) ? 0 : ((numberOfReceivePackets > 3) ? 3 : numberOfReceivePackets);
     this->packetSize = (packetSize < 1) ? 1 : ((packetSize > 32) ? 32 : packetSize);
     powerLevel = (powerLevel < 0) ? 0 : ((powerLevel > 3) ? 3 : powerLevel);
 
-    // Allocate memory for send and receive packets
     for (int i = 0; i < numberOfSendPackets; ++i)
+    {
         sendPackets[i] = new uint8_t[packetSize]();
+    }
 
     for (int i = 0; i < numberOfReceivePackets; ++i)
+    {
         receivePackets[i] = new uint8_t[packetSize]();
+    }
 
     ClearSendPackets();
     ClearReceivePackets();
 
-    // Initialize Radio
     spiPort->begin();
-    radio.begin(spiPort, pinCE, pinCS);
+    radio.begin(spiPort, pinCE, PinCS);
     radio.stopListening();
     radio.powerDown();
     radio.setPALevel(powerLevel);
@@ -36,7 +39,6 @@ void RadioMaster::Init(_SPI* spiPort, uint8_t pinCE, uint8_t pinCS, int8_t power
     radio.powerUp();
     radio.startListening();
 
-    // Frame Timing
     this->frameRate = (frameRate < 10) ? 10 : ((frameRate > 120) ? 120 : frameRate);
     microsPerFrame = 1000000 / frameRate;
 }
@@ -101,9 +103,10 @@ void RadioMaster::UpdateRecording()
 
 void RadioMaster::WaitAndSend()
 {
+    xSemaphoreTake(radioMutex, portMAX_DELAY);
     while (!IsFrameReady())
     {
-        vTaskDelay(1);  // Yield to allow other tasks to run
+        taskYIELD();
     }
 
     radio.stopListening();
@@ -120,19 +123,24 @@ void RadioMaster::WaitAndSend()
     {
         channelHopCounter = 0;
         currentChannelIndex++;
-        if (currentChannelIndex >= channelsToHop) currentChannelIndex = 0;
+        if (currentChannelIndex >= channelsToHop)
+        {
+            currentChannelIndex = 0;
+        }
         radio.setChannel(channelList[currentChannelIndex]);
     }
 
     radio.startListening();
     ClearSendPackets();
+    xSemaphoreGive(radioMutex);
 }
 
 void RadioMaster::Receive()
 {
+    xSemaphoreTake(radioMutex, portMAX_DELAY);
     ClearReceivePackets();
 
-    for (int i = 0; i < 3; i++)  // Always check 3 times to clear the input buffers
+    for (int i = 0; i < 3; i++) 
     {
         if (radio.available())
         {
@@ -147,4 +155,5 @@ void RadioMaster::Receive()
     }
 
     UpdateRecording();
+    xSemaphoreGive(radioMutex);
 }

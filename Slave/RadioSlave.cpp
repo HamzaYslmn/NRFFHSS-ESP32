@@ -29,7 +29,7 @@ void RadioSlave::Init(_SPI* spiPort, uint8_t pinCE, uint8_t pinCS, uint8_t pinIR
   radio.stopListening();
   radio.powerDown();
   radio.setPALevel(powerLevel);
-  radio.setAddressWidth(5);
+  radio.setAddressWidth(3);
   radio.openReadingPipe(1, address[0]);  // Master address
   radio.openWritingPipe(address[1]);     // Slave address
   radio.setDataRate(RF24_1MBPS);

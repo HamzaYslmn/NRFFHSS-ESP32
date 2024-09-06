@@ -15,7 +15,7 @@ void RadioMaster::Init(_SPI* spiPort, uint8_t pinCE, uint8_t PinCS, int8_t power
 
   for (int i = 0; i < numberOfReceivePackets; ++i) 
   {
-    receivePackets[i] = new uint8_t[packetSize]();
+    recievePackets[i] = new uint8_t[packetSize]();
   }
 
   ClearSendPackets();
@@ -27,7 +27,7 @@ void RadioMaster::Init(_SPI* spiPort, uint8_t pinCE, uint8_t PinCS, int8_t power
   radio.stopListening();
   radio.powerDown();
   radio.setPALevel(powerLevel);
-  radio.setAddressWidth(3);
+  radio.setAddressWidth(5);
   radio.setDataRate(RF24_1MBPS);
   radio.setAutoAck(false);
   radio.setRetries(0, 0);
@@ -58,7 +58,7 @@ void RadioMaster::ClearReceivePackets()
   for(int i = 0; i < numberOfReceivePackets; i++)
   {
     receivePacketsAvailable[i] = false;
-    memset(receivePackets[i], 0, packetSize);
+    memset(recievePackets[i], 0, packetSize);
     byteReceiveCounter[i] = 1;
   }
 }
@@ -96,8 +96,8 @@ void RadioMaster::UpdateRecording()
   if(secondCounter >= frameRate)
   {
     secondCounter = 0;
-    receivedPerSecond = receivedPacketCount;
-    receivedPacketCount = 0;
+    receivedPerSecond = recievedPacketCount;
+    recievedPacketCount = 0;
     isSecondTick = true;
   }
 }
@@ -136,12 +136,12 @@ void RadioMaster::Receive()
   {
     if (radio.available())
     {       
-      receivedPacketCount++;
+      recievedPacketCount++;
       uint8_t currentPacket[packetSize];
       radio.read(currentPacket, packetSize);
       uint8_t firstByte = currentPacket[0];
       uint8_t packetId = firstByte & 0x03;
-      memcpy(receivePackets[packetId], currentPacket, packetSize);
+      memcpy(recievePackets[packetId], currentPacket, packetSize);
       receivePacketsAvailable[packetId] = true;
     }
   }

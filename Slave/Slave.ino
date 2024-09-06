@@ -20,6 +20,9 @@ uint8_t value3;
 void setup() {
     Serial.begin(115200);
     // Init must be called first with the following defined Parameters
+    radio.setMasterID("UST01");
+    radio.setSlaveID("UST02");
+    radio.setChannelSeed(76, 124, 12345);
     radio.Init(&SPI, CE_PIN, CS_PIN, IRQ_PIN, POWER_LEVEL, PACKET_SIZE, NUMBER_OF_SENDPACKETS, NUMBER_OF_RECEIVE_PACKETS, FRAME_RATE);
 
     // Create the Slave task

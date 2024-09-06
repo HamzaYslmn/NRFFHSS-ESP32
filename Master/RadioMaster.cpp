@@ -29,9 +29,9 @@ void RadioMaster::Init(_SPI* spiPort, uint8_t pinCE, uint8_t pinCS, int8_t power
     radio.setAutoAck(false);
     radio.setRetries(0, 0);
     radio.setPayloadSize(this->packetSize);
-    radio.openReadingPipe(1, addressRec);
-    radio.openWritingPipe(addressTransmit);
-    radio.setChannel(channelList[currentChannelIndex]);
+    radio.openReadingPipe(1, slaveID);  // Use slaveID
+    radio.openWritingPipe(masterID);    // Use masterID
+    radio.setChannel(channels_Gen[currentChannelIndex]);
     radio.startListening();
 
     // Frame timing
@@ -116,7 +116,7 @@ void RadioMaster::WaitAndSend()
     if (channelHopCounter == 0)
     {
         currentChannelIndex = (currentChannelIndex + 1) % channelsToHop;
-        radio.setChannel(channelList[currentChannelIndex]);
+        radio.setChannel(channels_Gen[currentChannelIndex]);
     }
 
     radio.startListening();
@@ -147,4 +147,41 @@ void RadioMaster::Receive()
 void RadioMaster::YieldTask()
 {
     vTaskDelay(1);  // Yield to prevent watchdog timer errors
+}
+
+void RadioMaster::setChannelSeed(uint8_t lowerBound, uint8_t upperBound, uint32_t seed)
+{
+    GenerateChannels(lowerBound, upperBound, seed);
+}
+
+void RadioMaster::setMasterID(const char* masterID)
+{
+    memcpy(this->masterID, masterID, 6);
+}
+
+void RadioMaster::setSlaveID(const char* slaveID)
+{
+    memcpy(this->slaveID, slaveID, 6);
+}
+
+void RadioMaster::GenerateChannels(uint8_t lowerBound, uint8_t upperBound, uint32_t seed)
+{
+    randomSeed(seed);
+    uint8_t availableNumbers[upperBound - lowerBound + 1];
+    for (uint8_t i = 0; i <= (upperBound - lowerBound); i++)
+    {
+        availableNumbers[i] = lowerBound + i;
+    }
+    for (int i = (upperBound - lowerBound); i > 0; i--)
+    {
+        int j = random(0, i + 1);
+        uint8_t temp = availableNumbers[i];
+        availableNumbers[i] = availableNumbers[j];
+        availableNumbers[j] = temp;
+    }
+    channels_Gen[0] = 125;
+    for (int i = 1; i < 40; i++)
+    {
+        channels_Gen[i] = availableNumbers[i - 1];
+    }
 }

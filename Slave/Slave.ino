@@ -19,10 +19,13 @@ uint8_t value3;
 
 void setup() {
     Serial.begin(115200);
+    // Set custom addresses for Master and Slave
+    radio.SetAddresses("UST01", "ALT01");
+    
+    // Generate the channels with lower bound, upper bound, and a seed value
+    radio.GenerateChannels(76, 124, 12345);
+
     // Init must be called first with the following defined Parameters
-    radio.setMasterID("UST01");
-    radio.setSlaveID("UST02");
-    radio.setChannelSeed(76, 124, 12345);
     radio.Init(&SPI, CE_PIN, CS_PIN, IRQ_PIN, POWER_LEVEL, PACKET_SIZE, NUMBER_OF_SENDPACKETS, NUMBER_OF_RECEIVE_PACKETS, FRAME_RATE);
 
     // Create the Slave task
@@ -59,7 +62,7 @@ void slaveTask(void *pvParameters) {
 }
 
 void AddSendData() {
-    int16_t slaveRecPerSecond = radio.GetReceivedPacketsPerSecond();  // Get the number of Packets we are receiving per second
+    int16_t slaveRecPerSecond = radio.GetRecievedPacketsPerSecond();  // Get the number of Packets we are receiving per second
     int16_t number16Bit = 23145;      // Useless variable we will send
     uint8_t numberU8Bit = 50;         // Useless variable we will send
     float numberFloat = 302.234f;     // Useless variable we will send

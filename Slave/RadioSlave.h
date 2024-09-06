@@ -15,13 +15,10 @@ class RadioSlave
 {
 private:
   static RadioSlave* handlerInstance;
-
-    // Radio communication parameters
+//Radio Stuff
   RF24 radio;
-  // New member variables for IDs and seed
-  uint8_t channels_Gen[40]; // For dynamically generated channels
-  uint8_t masterID[6];
-  uint8_t slaveID[6];
+  uint8_t channels_Gen[40];  // Dynamically generated channels
+  uint8_t address[2][6];     // Custom dynamic addresses for Master and Slave
   const uint8_t channelsToHop = 40;
   const uint8_t framesPerHop = 2;
   int8_t currentChannelIndex = 0;
@@ -76,24 +73,20 @@ private:
   bool UpdateHop();
   static void StaticIRQHandler();
   void IRQHandler();
-  void GenerateChannels(uint8_t lowerBound, uint8_t upperBound, uint32_t seed);
-
 
 public:
   void Init(_SPI* spiPort, uint8_t pinCE, uint8_t pinCS, uint8_t pinIRQ, int8_t powerLevel, uint8_t packetSize, uint8_t numberOfSendPackets, uint8_t numberOfReceivePackets, uint8_t frameRate);
+  void SetAddresses(const char* masterID, const char* slaveID);  // Dynamic address setter
   void WaitAndSend();
   void Receive();
   bool IsNewPacket(uint8_t packetId) {return receivePacketsAvailable[packetId]; }
-  uint16_t GetReceivedPacketsPerSecond() {return receivedPerSecond; }
+  uint16_t GetRecievedPacketsPerSecond() {return receivedPerSecond; }
   int16_t GetDriftAdjustmentMicros() { return totalAdjustedDrift; }
   int8_t GetCurrentChannel() { return channels_Gen[currentChannelIndex]; }
   bool IsSecondTick() {return isSecondTick; }
   template <typename T> void AddNextPacketValue(uint8_t packetId, T data);
   template <typename T> T GetNextPacketValue(uint8_t packetId);
-  // New functions for seed and IDs
-  void setChannelSeed(uint8_t lowerBound, uint8_t upperBound, uint32_t seed);
-  void setMasterID(const char* masterID);
-  void setSlaveID(const char* slaveID);
+  void GenerateChannels(uint8_t lowerBound, uint8_t upperBound, uint32_t seed);
 };
 
 

@@ -27,10 +27,14 @@ uint32_t lastNumberU32Bit = 0;
 
 void setup() {
     Serial.begin(115200);
+    
+    // Set custom addresses for Master and Slave
+    radio.SetAddresses("UST01", "ALT01");
+    
+    // Generate the channels with lower bound, upper bound, and a seed value
+    radio.GenerateChannels(76, 124, 12345);
+
     // Init must be called first with the following defined Parameters
-    radio.setMasterID("UST01");
-    radio.setSlaveID("UST02");
-    radio.setChannelSeed(76, 124, 12345);
     radio.Init(&SPI, CE_PIN, CS_PIN, POWER_LEVEL, PACKET_SIZE, NUMBER_OF_SENDPACKETS, NUMBER_OF_RECEIVE_PACKETS, FRAME_RATE);
 
     // Create the Master task
@@ -52,7 +56,7 @@ void masterTask(void *pvParameters) {
         if (radio.IsSecondTick()) {
             // Print out received data in a human-readable format
             String dataString = "---- Master Received Data ----\n";
-            dataString += "Slave/Master Rec. Per Second: " + String(lastSlaveRecPerSecond) + " | " + String(radio.GetReceivedPacketsPerSecond()) + "\n";
+            dataString += "Slave/Master Rec. Per Second: " + String(lastSlaveRecPerSecond) + " | " + String(radio.GetRecievedPacketsPerSecond()) + "\n";
             dataString += "Received 16-bit value: " + String(lastNumber16Bit) + "\n";
             dataString += "Received 8-bit value: " + String(lastNumberU8Bit) + "\n";
             dataString += "Received Float: " + String(lastNumberFloat, 2) + "\n";
@@ -76,7 +80,7 @@ void AddSendData() {
     // Eg for 4 x int16_t values we need 8 bytes + 1. So PACKET_SIZE should be 9 bytes
     // Both Master and Slave need to have the same PACKET_SIZE. Not all bytes need to be used in each packet
 
-    int16_t masterRecPerSecond = radio.GetReceivedPacketsPerSecond();
+    int16_t masterRecPerSecond = radio.GetRecievedPacketsPerSecond();
     uint32_t masterMicros = micros();
     uint16_t value2 = 5343;
     uint8_t value3 = 143; 

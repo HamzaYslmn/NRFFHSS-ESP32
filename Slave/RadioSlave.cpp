@@ -295,7 +295,7 @@ void RadioSlave::UpdateSecondCounter()
 
 void RadioSlave::WaitAndSend()
 {
-  while(!IsFrameReady()) {}
+  while(!IsFrameReady()) {vTaskDelay(1);}
 
 
   bool hasStoppedListening = UpdateHop();

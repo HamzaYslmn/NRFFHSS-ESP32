@@ -8,7 +8,7 @@
 #define POWER_LEVEL 0               // 0 lowest Power, 3 highest Power (Use separate 3.3v power supply for NRF above 0)
 #define PACKET_SIZE 32              // Max 32 Bytes. Must match the Master's Packet Size. How many bytes you are maximum packing into each packet. Useable size is 1 less than this as first byte is PacketID and Hopping information
 #define NUMBER_OF_SENDPACKETS 2     // Max of 3 Packets. How many packets per frame the slave will send. The master needs to have the same amount of receive packets
-#define NUMBER_OF_RECEIVE_PACKETS 1 // Max of 3 Packets. How many packets per frame the slave will receive. The Master needs to have the same amount of send packets
+#define NUMBER_OF_RECEIVE_PACKETS 2 // Max of 3 Packets. How many packets per frame the slave will receive. The Master needs to have the same amount of send packets
 #define FRAME_RATE 50               // Locked frame rate of the microcontroller. Must match the Master's Framerate
 
 RadioSlave radio;
@@ -28,15 +28,12 @@ void setup() {
     // Init must be called first with the following defined Parameters
     radio.Init(&SPI, CE_PIN, CS_PIN, IRQ_PIN, POWER_LEVEL, PACKET_SIZE, NUMBER_OF_SENDPACKETS, NUMBER_OF_RECEIVE_PACKETS, FRAME_RATE);
 
-    // Create the Slave task
-    xTaskCreate(slaveTask, "SlaveTask", 4096, NULL, 1, NULL);
-}
-
-void loop() {
-    // FreeRTOS handles the loop function with tasks, so nothing is needed here.
+    // Create the Slave task on Core 1, Wifi/BT runs on Core 0
+    xTaskCreatePinnedToCore(slaveTask, "SlaveTask", 4096, NULL, 1, NULL, 1);
 }
 
 void slaveTask(void *pvParameters) {
+    Serial.println("Slave Task On: " + String(xPortGetCoreID()) + " | " + String(ESP.getCpuFreqMHz()) + "MHz");
     while (1) {
         radio.WaitAndSend();    // Must be called at the start of every frame. Is blocking until the frame time is up
         radio.Receive();        // Call this second on every Frame
@@ -47,7 +44,7 @@ void slaveTask(void *pvParameters) {
         if (radio.IsSecondTick()) {
             // Print out received data in a human-readable format
             String dataString = "---- Slave Received Data ----\n";
-            dataString += "Master Rec. Per Second: " + String(masterRecPerSecond) + "\n";
+            dataString += "Slave/Master Rec. Per Second: " + String(radio.GetRecievedPacketsPerSecond()) + " | " + String(masterRecPerSecond) + "\n";
             dataString += "Received Microseconds: " + String(masterMicros) + "\n";
             dataString += "Received 16-bit value: " + String(value2) + "\n";
             dataString += "Received 8-bit value: " + String(value3) + "\n";
@@ -90,3 +87,5 @@ void ProcessReceived() {
         value3 = radio.GetNextPacketValue<uint8_t>(PACKET1);
     }
 }
+
+void loop() {vTaskDelete(NULL);}

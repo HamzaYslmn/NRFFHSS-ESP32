@@ -13,7 +13,7 @@
 #define CS_PIN 17                     // CS Pin connected to the NRF
 #define POWER_LEVEL 0                 // 0 lowest Power, 3 highest Power (Use separate 3.3v power supply for NRF above 0)
 #define PACKET_SIZE 32                // Max 32 Bytes. Must match the slave packet size. How many bytes you are maximum packing into each packet. Useable size is 1 less than this as first byte is PacketID and Hopping information
-#define NUMBER_OF_SENDPACKETS 1       // Max of 3 Packets. How many packets per frame the Master will send. The Slave needs to have the same amount of receive packets
+#define NUMBER_OF_SENDPACKETS 2       // Max of 3 Packets. How many packets per frame the Master will send. The Slave needs to have the same amount of receive packets
 #define NUMBER_OF_RECEIVE_PACKETS 2   // Max of 3 Packets. How many packets per frame the Master will receive. The Slave needs to have the same amount of send packets
 #define FRAME_RATE 50                 // Locked frame rate of the microcontroller. Must match the Slaves Framerate
 
@@ -37,15 +37,12 @@ void setup() {
     // Init must be called first with the following defined Parameters
     radio.Init(&SPI, CE_PIN, CS_PIN, POWER_LEVEL, PACKET_SIZE, NUMBER_OF_SENDPACKETS, NUMBER_OF_RECEIVE_PACKETS, FRAME_RATE);
 
-    // Create the Master task
-    xTaskCreate(masterTask, "MasterTask", 4096, NULL, 1, NULL);
-}
-
-void loop() {
-    // FreeRTOS handles the loop function with tasks, so nothing is needed here.
+    // Create the Master task on Core 1, Wifi/BT runs on Core 0
+    xTaskCreatePinnedToCore(masterTask, "MasterTask", 4096, NULL, 1, NULL, 1);
 }
 
 void masterTask(void *pvParameters) {
+    Serial.println("Master Task On: " + String(xPortGetCoreID()) + " | " + String(ESP.getCpuFreqMHz()) + "MHz");
     while (1) {
         radio.WaitAndSend();
         radio.Receive();
@@ -107,3 +104,5 @@ void ProcessReceived() {
         lastNumberU32Bit = radio.GetNextPacketValue<uint32_t>(PACKET2);
     }
 }
+
+void loop() {vTaskDelete(NULL);}
